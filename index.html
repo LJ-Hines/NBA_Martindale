@@ -3,15 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Score Counter</title>
+<title>Betting Tracker</title>
 <style>
   :root {
     --bg: #0b0e14;
     --panel: #141a24;
+    --panel-2: #1b2330;
     --line: #26303f;
     --text: #e8edf4;
     --muted: #9aa7b8;
     --accent: #ff7a1a;
+    --win: #2ecc71;
     --loss: #ff5c6c;
     --radius: 14px;
   }
@@ -22,111 +24,335 @@
     background: radial-gradient(1200px 600px at 80% -10%, #182234 0%, var(--bg) 60%);
     color: var(--text);
     min-height: 100vh;
-    display: grid;
-    place-items: center;
   }
+  header { padding: 22px 24px 0; text-align: center; }
+  h1 { margin: 0; font-size: 22px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+
+  .players {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+    padding: 20px 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  @media (max-width: 860px) { .players { grid-template-columns: 1fr; } }
+
   .card {
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--radius);
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-    padding: 32px 40px;
-    text-align: center;
-    min-width: 340px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
   }
-  h1 { margin: 0 0 4px; font-size: 20px; }
-  .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
-  .score {
-    font-size: 104px;
-    font-weight: 800;
-    line-height: 1;
-    margin: 8px 0 28px;
-    font-variant-numeric: tabular-nums;
+  .who { display: flex; align-items: center; gap: 14px; }
+  .avatar {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: #fff;
+    border: 2px solid var(--line);
+  }
+  .name { font-size: 20px; font-weight: 700; margin: 0; }
+  .record { color: var(--muted); font-size: 13px; margin: 2px 0 0; }
+  .balance { font-size: 44px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  .balance.up { color: var(--win); }
+  .balance.down { color: var(--loss); }
+  .in-play { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+  form { display: grid; grid-template-columns: 1fr 90px 70px; gap: 8px; }
+  form .pick, form button { grid-column: 1 / -1; }
+  input {
+    font: inherit;
+    font-size: 14px;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: #0f141c;
+    color: var(--text);
   }
   button {
     font: inherit;
+    font-size: 14px;
     font-weight: 700;
     border: 0;
-    border-radius: 999px;
+    border-radius: 8px;
     cursor: pointer;
-    padding: 12px 28px;
+    padding: 9px 14px;
     background: var(--accent);
     color: #1a1204;
-    font-size: 16px;
-    transition: transform 0.08s ease;
   }
-  button:active { transform: scale(0.96); }
-  button.big { font-size: 30px; padding: 18px 56px; }
-  .status { margin: 16px 0 0; font-size: 12px; color: var(--muted); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .bets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .bet {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    align-items: center;
+    font-size: 14px;
+  }
+  .desc { min-width: 0; overflow-wrap: anywhere; }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .actions { display: flex; gap: 6px; align-items: center; }
+  .actions button { padding: 5px 10px; font-size: 12px; }
+  .actions .btn-won { background: var(--win); color: #062b14; }
+  .actions .btn-lost { background: var(--loss); color: #2b0609; }
+  .actions .btn-ghost { background: none; color: var(--muted); padding: 4px 6px; font-size: 16px; }
+  .actions .badge { border-radius: 999px; padding: 3px 10px; }
+  .actions .badge.won { background: rgba(46, 204, 113, 0.15); color: var(--win); }
+  .actions .badge.lost { background: rgba(255, 92, 108, 0.15); color: var(--loss); }
+  .empty { color: var(--muted); font-size: 13px; text-align: center; margin: 4px 0; }
+
+  .status { text-align: center; font-size: 12px; color: var(--muted); margin: 0 0 20px; }
   .status.err { color: var(--loss); }
-  .hidden { display: none; }
 </style>
 </head>
 <body>
-<main class="card">
-  <h1>Score</h1>
-
-  <div class="score" id="total">…</div>
-  <button class="big" id="incBtn">+1</button>
-  <p class="status" id="status">Loading…</p>
-</main>
+<header>
+  <h1>Betting Tracker</h1>
+  <p class="sub">$75 start · $5 a day</p>
+</header>
+<main class="players" id="players"></main>
+<p class="status" id="status">Loading…</p>
 
 <script>
-  const API = "https://abacus.jasoncameron.dev";
-  // Unlisted counter: anyone who knows this key can read or increment it.
-  const COUNTER = "nba-martindale/score-k7q2x9";
-  const POLL_MS = 15000;
-  const $ = (id) => document.getElementById(id);
+  // Firebase Realtime Database URL, e.g. https://my-project-default-rtdb.asia-southeast1.firebasedatabase.app
+  const DB_URL = "PASTE_DATABASE_URL_HERE";
+  const START_BALANCE = 75;
+  const DEFAULT_STAKE = 5;
+  const POLL_MS = 30000;
+  const PLAYERS = [
+    { id: "chams", name: "Chams", photo: "chams.png" },
+    { id: "lachie", name: "Lachie", photo: "lachie.png" },
+    { id: "matt", name: "Matt", photo: "matt.png" },
+  ];
 
-  let current = 0;
+  const $ = (id) => document.getElementById(id);
+  const views = {};
+  let bets = {};
 
   function setStatus(msg, isErr = false) {
     $("status").textContent = msg;
     $("status").classList.toggle("err", isErr);
   }
 
-  // The counter only goes up, so ignore out-of-order (older) responses.
-  function show(value) {
-    current = Math.max(current, value);
-    $("total").textContent = current;
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
   }
 
-  async function call(action) {
-    const res = await fetch(`${API}/${action}/${COUNTER}`, { cache: "no-store" });
-    if (action === "get" && res.status === 404) return 0;
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || res.statusText);
-    return data.value;
+  function btn(text, cls, onClick) {
+    const b = el("button", cls, text);
+    b.type = "button";
+    b.addEventListener("click", onClick);
+    return b;
   }
 
-  async function refresh() {
+  const money = (n) => `${n < 0 ? "-" : ""}$${Math.abs(n).toFixed(2)}`;
+
+  // Accepts fractional odds ("5/2", "5-2") or a plain "to 1" number ("2.5").
+  function parseOdds(input) {
+    const t = input.trim();
+    const frac = t.match(/^(\d+(?:\.\d+)?)\s*[-/:]\s*(\d+(?:\.\d+)?)$/);
+    if (frac) return { value: Number(frac[1]) / Number(frac[2]), text: `${frac[1]}-${frac[2]}` };
+    return { value: Number(t), text: `${t}-1` };
+  }
+
+  async function db(method, path, body) {
+    const res = await fetch(`${DB_URL}/${path}.json`, {
+      method,
+      cache: "no-store",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((data && data.error) || res.statusText);
+    return data;
+  }
+
+  async function load() {
     try {
-      show(await call("get"));
+      bets = (await db("GET", "bets")) || {};
+      render();
       setStatus(`Synced ${new Date().toLocaleTimeString()}`);
     } catch (e) {
-      setStatus(`Can't load score: ${e.message}`, true);
+      setStatus(`Can't load bets: ${e.message}`, true);
     }
   }
 
-  $("incBtn").addEventListener("click", async () => {
-    $("total").textContent = current + 1;
+  async function save(action, okMsg) {
     try {
-      show(await call("hit"));
-      setStatus("Saved");
+      await action();
+      await load();
+      setStatus(okMsg);
     } catch (e) {
-      $("total").textContent = current;
       setStatus(`Not saved: ${e.message}`, true);
     }
-  });
+  }
 
-  refresh();
-  setInterval(refresh, POLL_MS);
+  const setResult = (id, result) =>
+    save(() => db("PATCH", `bets/${encodeURIComponent(id)}`, { result }), "Result saved");
 
-  // Live updates when the other person clicks; polling above is the fallback.
-  const stream = new EventSource(`${API}/stream/${COUNTER}`);
-  stream.onmessage = (e) => {
-    try { show(JSON.parse(e.data).value); } catch { /* ignore keep-alives */ }
-  };
+  // Stake is taken out when placed; a win pays back stake plus stake × odds.
+  function summarise(playerId) {
+    const list = Object.entries(bets)
+      .filter(([, b]) => b && b.player === playerId)
+      .sort((a, b) => b[1].created - a[1].created);
+    let balance = START_BALANCE, inPlay = 0, won = 0, lost = 0;
+    for (const [, b] of list) {
+      balance -= b.stake;
+      if (b.result === "won") { balance += b.stake * (b.odds + 1); won++; }
+      else if (b.result === "lost") lost++;
+      else inPlay += b.stake;
+    }
+    return { list, balance, inPlay, won, lost };
+  }
+
+  function betRow(id, b) {
+    const li = el("li", "bet");
+    const date = new Date(b.created).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    const outcome =
+      b.result === "won" ? `+${money(b.stake * b.odds)}` :
+      b.result === "lost" ? money(-b.stake) :
+      `to win ${money(b.stake * b.odds)}`;
+
+    const desc = el("div", "desc");
+    desc.append(el("div", null, b.pick || "Bet"), el("div", "meta", `${date} · ${money(b.stake)} @ ${b.oddsText} · ${outcome}`));
+
+    const actions = el("div", "actions");
+    if (b.result === "won" || b.result === "lost") {
+      const badge = btn(b.result === "won" ? "Won" : "Lost", `badge ${b.result}`, () => {
+        if (confirm("Undo this result?")) setResult(id, "pending");
+      });
+      badge.title = "Click to undo";
+      actions.append(badge);
+    } else {
+      actions.append(
+        btn("Won", "btn-won", () => setResult(id, "won")),
+        btn("Lost", "btn-lost", () => setResult(id, "lost"))
+      );
+    }
+    const del = btn("×", "btn-ghost", () => {
+      if (confirm("Delete this bet?")) save(() => db("DELETE", `bets/${encodeURIComponent(id)}`), "Bet deleted");
+    });
+    del.title = "Delete bet";
+    actions.append(del);
+
+    li.append(desc, actions);
+    return li;
+  }
+
+  // Cards are built once so live refreshes don't wipe what someone is typing.
+  function buildCard(p) {
+    const card = el("section", "card");
+
+    const who = el("div", "who");
+    const img = el("img", "avatar");
+    img.src = p.photo;
+    img.alt = p.name;
+    const info = el("div");
+    const record = el("p", "record");
+    info.append(el("p", "name", p.name), record);
+    who.append(img, info);
+
+    const balanceWrap = el("div");
+    const balance = el("div", "balance");
+    const inPlay = el("div", "in-play");
+    balanceWrap.append(balance, inPlay);
+
+    const form = el("form");
+    const pick = el("input", "pick");
+    pick.placeholder = "Pick (e.g. Lakers to win)";
+    pick.maxLength = 100;
+    const odds = el("input");
+    odds.placeholder = "Odds 5/2";
+    odds.required = true;
+    const stake = el("input");
+    stake.type = "number";
+    stake.min = "0.01";
+    stake.step = "0.01";
+    stake.value = DEFAULT_STAKE;
+    stake.title = "Stake ($)";
+    const add = el("button", null, "Add bet");
+    form.append(pick, odds, stake, add);
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const o = parseOdds(odds.value);
+      const s = Number(stake.value);
+      if (!Number.isFinite(o.value) || o.value <= 0 || o.value > 100) {
+        setStatus("Enter odds like 5/2, 2-1 or 2.5", true);
+        return;
+      }
+      if (!(s > 0 && s <= 1000)) {
+        setStatus("Enter a stake between $0.01 and $1000", true);
+        return;
+      }
+      add.disabled = true;
+      await save(async () => {
+        await db("POST", "bets", {
+          player: p.id,
+          pick: pick.value.trim().slice(0, 100),
+          odds: o.value,
+          oddsText: o.text.slice(0, 20),
+          stake: s,
+          result: "pending",
+          created: Date.now(),
+        });
+        pick.value = "";
+        odds.value = "";
+      }, `Bet added for ${p.name}`);
+      add.disabled = false;
+    });
+
+    const list = el("ul", "bets");
+    card.append(who, balanceWrap, form, list);
+    $("players").append(card);
+    views[p.id] = { record, balance, inPlay, list };
+  }
+
+  function render() {
+    for (const p of PLAYERS) {
+      const v = views[p.id];
+      const s = summarise(p.id);
+      v.balance.textContent = money(s.balance);
+      v.balance.classList.toggle("up", s.balance > START_BALANCE);
+      v.balance.classList.toggle("down", s.balance < START_BALANCE);
+      v.inPlay.textContent = s.inPlay ? `${money(s.inPlay)} in play` : "";
+      v.record.textContent = `${s.won}W · ${s.lost}L`;
+      v.list.replaceChildren(
+        ...(s.list.length ? s.list.map(([id, b]) => betRow(id, b)) : [el("li", "empty", "No bets yet")])
+      );
+    }
+  }
+
+  PLAYERS.forEach(buildCard);
+  render();
+
+  if (DB_URL.startsWith("PASTE")) {
+    setStatus("Database not connected yet: set DB_URL at the top of the script.", true);
+  } else {
+    load();
+    setInterval(load, POLL_MS);
+    // Firebase streams change events; reload on each so all three see updates live.
+    const stream = new EventSource(`${DB_URL}/bets.json`);
+    let timer;
+    const onChange = () => { clearTimeout(timer); timer = setTimeout(load, 300); };
+    stream.addEventListener("put", onChange);
+    stream.addEventListener("patch", onChange);
+  }
 </script>
 </body>
 </html>
