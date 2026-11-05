@@ -29,26 +29,85 @@
   h1 { margin: 0; font-size: 22px; }
   .sub { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
 
-  .players {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 18px;
-    padding: 20px 24px;
+  .wrap {
     max-width: 1200px;
     margin: 0 auto;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
   }
-  @media (max-width: 860px) { .players { grid-template-columns: 1fr; } }
+  .players, .today-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+  .bottom { display: grid; grid-template-columns: 2fr 1fr; gap: 18px; }
+  @media (max-width: 860px) {
+    .players, .today-grid, .bottom { grid-template-columns: 1fr; }
+  }
 
-  .card {
+  .card, .panel {
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--radius);
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
     padding: 20px;
+  }
+  .card {
     display: flex;
     flex-direction: column;
     gap: 14px;
+    transition: border-color 0.2s, box-shadow 0.2s;
   }
+  .card.leader {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 0 28px rgba(255, 122, 26, 0.35);
+  }
+  .section-title { font-size: 15px; margin: 0 0 12px; }
+  .rank { margin-left: 6px; }
+  .tag {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-left: 6px;
+  }
+  .tag:empty { display: none; }
+  .tag.hot { background: rgba(255, 122, 26, 0.15); color: var(--accent); }
+  .tag.cold { background: rgba(47, 155, 255, 0.15); color: #2f9bff; }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .stat {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 4px;
+    text-align: center;
+  }
+  .stat b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 11px; }
+  .bars svg { display: block; width: 100%; height: 48px; }
+  .bars-label { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+
+  .today-item { display: flex; gap: 12px; align-items: flex-start; }
+  .today-item .avatar { width: 40px; height: 40px; flex: none; }
+  .today-item .name { font-size: 15px; }
+  .today-bet { font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+  .nudge { color: var(--accent); font-size: 13px; margin-top: 2px; }
+
+  .race-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
+  #race svg { display: block; width: 100%; height: auto; }
+
+  .fame { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .fame li {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+  .fame .label { color: var(--muted); font-size: 12px; }
+  .fame .value { font-weight: 700; margin-top: 2px; }
   .who { display: flex; align-items: center; gap: 14px; }
   .avatar {
     width: 72px;
@@ -121,9 +180,30 @@
 <body>
 <header>
   <h1>Betting Tracker</h1>
-  <p class="sub">$75 start · $5 a day</p>
+  <p class="sub" id="dayInfo">$75 start · $5 a day</p>
 </header>
-<main class="players" id="players"></main>
+<div class="wrap">
+  <section class="panel">
+    <h2 class="section-title" id="todayTitle">Today</h2>
+    <div class="today-grid" id="today"></div>
+  </section>
+
+  <main class="players" id="players"></main>
+
+  <div class="bottom">
+    <section class="panel">
+      <div class="race-head">
+        <h2 class="section-title">Balance race</h2>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div id="race"></div>
+    </section>
+    <section class="panel">
+      <h2 class="section-title">Hall of fame</h2>
+      <ul class="fame" id="fame"></ul>
+    </section>
+  </div>
+</div>
 <p class="status" id="status">Loading…</p>
 
 <script>
@@ -132,11 +212,14 @@
   const START_BALANCE = 75;
   const DEFAULT_STAKE = 5;
   const POLL_MS = 30000;
+  const BAR_DAYS = 14;
   const PLAYERS = [
-    { id: "chams", name: "Chams", photo: "chams.png" },
-    { id: "lachie", name: "Lachie", photo: "lachie.png" },
-    { id: "matt", name: "Matt", photo: "matt.png" },
+    { id: "chams", name: "Chams", photo: "chams.png", color: "#ff7a1a" },
+    { id: "lachie", name: "Lachie", photo: "lachie.png", color: "#2f9bff" },
+    { id: "matt", name: "Matt", photo: "matt.png", color: "#b36bff" },
   ];
+  const PLAYER_BY_ID = Object.fromEntries(PLAYERS.map((p) => [p.id, p]));
+  const SVG_NS = "http://www.w3.org/2000/svg";
 
   const $ = (id) => document.getElementById(id);
   const views = {};
@@ -161,7 +244,34 @@
     return b;
   }
 
+  function svg(tag, attrs = {}) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    return node;
+  }
+
   const money = (n) => `${n < 0 ? "-" : ""}$${Math.abs(n).toFixed(2)}`;
+  const signedMoney = (n) => `${n >= 0 ? "+" : ""}${money(n)}`;
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const dayKey = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+  const shortDate = (key) => new Date(`${key}T00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const isSettled = (b) => b.result === "won" || b.result === "lost";
+  const profit = (b) => (b.result === "won" ? b.stake * (b.odds - 1) : b.result === "lost" ? -b.stake : 0);
+
+  // Every calendar day from the first bet to today.
+  function dayRange() {
+    const times = Object.values(bets).filter(Boolean).map((b) => b.created);
+    if (!times.length) return [];
+    const d = new Date(Math.min(...times));
+    d.setHours(0, 0, 0, 0);
+    const end = new Date();
+    const days = [];
+    while (d <= end) {
+      days.push(dayKey(d));
+      d.setDate(d.getDate() + 1);
+    }
+    return days;
+  }
 
   // Accepts fractional odds ("5/2", "5-2") or a plain "to 1" number ("2.5").
   function parseOdds(input) {
@@ -207,17 +317,38 @@
 
   // Stake is taken out when placed; a win pays stake × odds (which already includes the stake).
   function summarise(playerId) {
-    const list = Object.entries(bets)
+    const asc = Object.entries(bets)
       .filter(([, b]) => b && b.player === playerId)
-      .sort((a, b) => b[1].created - a[1].created);
+      .sort((a, b) => a[1].created - b[1].created);
     let balance = START_BALANCE, inPlay = 0, won = 0, lost = 0;
-    for (const [, b] of list) {
+    let staked = 0, net = 0, oddsSum = 0, biggestWin = 0, run = 0, bestRun = 0;
+    let streak = { result: null, n: 0 };
+    const daily = {};
+    for (const [, b] of asc) {
       balance -= b.stake;
-      if (b.result === "won") { balance += b.stake * b.odds; won++; }
-      else if (b.result === "lost") lost++;
-      else inPlay += b.stake;
+      oddsSum += b.odds;
+      if (!isSettled(b)) { inPlay += b.stake; continue; }
+      const p = profit(b);
+      staked += b.stake;
+      net += p;
+      daily[dayKey(b.created)] = (daily[dayKey(b.created)] || 0) + p;
+      streak = streak.result === b.result ? { result: b.result, n: streak.n + 1 } : { result: b.result, n: 1 };
+      if (b.result === "won") {
+        balance += b.stake * b.odds;
+        won++;
+        biggestWin = Math.max(biggestWin, p);
+        bestRun = Math.max(bestRun, ++run);
+      } else {
+        lost++;
+        run = 0;
+      }
     }
-    return { list, balance, inPlay, won, lost };
+    return {
+      asc, list: asc.slice().reverse(), balance, inPlay, won, lost, daily, streak, bestRun, biggestWin,
+      winPct: won + lost ? won / (won + lost) : null,
+      avgOdds: asc.length ? oddsSum / asc.length : null,
+      roi: staked ? net / staked : null,
+    };
   }
 
   function betRow(id, b) {
@@ -263,14 +394,34 @@
     img.src = p.photo;
     img.alt = p.name;
     const info = el("div");
-    const record = el("p", "record");
-    info.append(el("p", "name", p.name), record);
+    const nameLine = el("p", "name", p.name);
+    const rank = el("span", "rank");
+    nameLine.append(rank);
+    const recordLine = el("p", "record");
+    const record = el("span");
+    const streak = el("span", "tag");
+    recordLine.append(record, streak);
+    info.append(nameLine, recordLine);
     who.append(img, info);
 
     const balanceWrap = el("div");
     const balance = el("div", "balance");
     const inPlay = el("div", "in-play");
     balanceWrap.append(balance, inPlay);
+
+    const statsBox = el("div", "stats");
+    const stats = {};
+    for (const [key, label] of [["winPct", "Win %"], ["avgOdds", "Avg odds"], ["biggestWin", "Best win"], ["roi", "ROI"]]) {
+      const cell = el("div", "stat");
+      stats[key] = el("b");
+      cell.append(stats[key], el("span", null, label));
+      statsBox.append(cell);
+    }
+
+    const barsBox = el("div", "bars");
+    const barsLabel = el("div", "bars-label", `Daily profit/loss (last ${BAR_DAYS} days)`);
+    const bars = el("div");
+    barsBox.append(barsLabel, bars);
 
     const form = el("form");
     const pick = el("input", "pick");
@@ -318,24 +469,197 @@
     });
 
     const list = el("ul", "bets");
-    card.append(who, balanceWrap, form, list);
+    card.append(who, balanceWrap, statsBox, barsBox, form, list);
     $("players").append(card);
-    views[p.id] = { record, balance, inPlay, list };
+    views[p.id] = { card, rank, record, streak, balance, inPlay, stats, bars, list };
+  }
+
+  function renderBars(container, daily, days) {
+    const shown = days.slice(-BAR_DAYS);
+    if (!shown.some((d) => daily[d])) {
+      container.replaceChildren(el("div", "empty", "No results yet"));
+      return;
+    }
+    const W = 280, H = 48, mid = H / 2, slot = W / BAR_DAYS;
+    const maxAbs = Math.max(...shown.map((d) => Math.abs(daily[d] || 0)), 1);
+    const chart = svg("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none" });
+    chart.append(svg("line", { x1: 0, x2: W, y1: mid, y2: mid, stroke: "#26303f" }));
+    shown.forEach((d, i) => {
+      const v = daily[d] || 0;
+      if (!v) return;
+      const h = Math.max(2, (Math.abs(v) / maxAbs) * (mid - 2));
+      const x = (BAR_DAYS - shown.length + i) * slot + slot * 0.15;
+      const bar = svg("rect", {
+        x, width: slot * 0.7, y: v > 0 ? mid - h : mid, height: h, rx: 2,
+        fill: v > 0 ? "#2ecc71" : "#ff5c6c",
+      });
+      const tip = svg("title");
+      tip.textContent = `${shortDate(d)}: ${signedMoney(v)}`;
+      bar.append(tip);
+      chart.append(bar);
+    });
+    container.replaceChildren(chart);
+  }
+
+  function renderToday(all) {
+    const today = dayKey(Date.now());
+    $("todayTitle").textContent = `Today · ${new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}`;
+    $("today").replaceChildren(...all.map(({ p, s }) => {
+      const item = el("div", "today-item");
+      const img = el("img", "avatar");
+      img.src = p.photo;
+      img.alt = p.name;
+      const body = el("div");
+      body.append(el("div", "name", p.name));
+      const todays = s.asc.filter(([, b]) => dayKey(b.created) === today);
+      if (!todays.length) body.append(el("div", "nudge", "⏰ No bet yet today"));
+      for (const [, b] of todays) {
+        const icon = b.result === "won" ? "✅" : b.result === "lost" ? "❌" : "⏳";
+        body.append(el("div", "today-bet", `${icon} ${b.pick || "Bet"} @ ${b.oddsText}`));
+      }
+      item.append(img, body);
+      return item;
+    }));
+  }
+
+  // End-of-day balance per player, using the same rules as the card balance.
+  function renderRace(all, days) {
+    $("legend").replaceChildren(...PLAYERS.map((p) => {
+      const item = el("span", null, p.name);
+      const dot = el("i");
+      dot.style.background = p.color;
+      item.prepend(dot);
+      return item;
+    }));
+    if (!days.length) {
+      $("race").replaceChildren(el("p", "empty", "The race starts after the first bet."));
+      return;
+    }
+
+    const series = all.map(({ p, s }) => {
+      const change = {};
+      for (const [, b] of s.asc) {
+        const k = dayKey(b.created);
+        change[k] = (change[k] || 0) - b.stake + (b.result === "won" ? b.stake * b.odds : 0);
+      }
+      let bal = START_BALANCE;
+      return { p, pts: [START_BALANCE, ...days.map((d) => (bal += change[d] || 0))] };
+    });
+
+    const W = 600, H = 260, L = 48, R = 24, T = 20, B = 30;
+    const values = series.flatMap((x) => x.pts);
+    const lo = Math.floor((Math.min(...values) - 2) / 5) * 5;
+    const hi = Math.ceil((Math.max(...values) + 2) / 5) * 5;
+    const n = days.length + 1;
+    const x = (i) => L + (i * (W - L - R)) / (n - 1);
+    const y = (v) => T + ((hi - v) / (hi - lo)) * (H - T - B);
+    const chart = svg("svg", { viewBox: `0 0 ${W} ${H}` });
+
+    const step = Math.max(5, Math.ceil((hi - lo) / 4 / 5) * 5);
+    for (let v = lo; v <= hi; v += step) {
+      chart.append(svg("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: "#26303f" }));
+      const label = svg("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end", fill: "#9aa7b8", "font-size": 13 });
+      label.textContent = `$${v}`;
+      chart.append(label);
+    }
+    chart.append(svg("line", {
+      x1: L, x2: W - R, y1: y(START_BALANCE), y2: y(START_BALANCE),
+      stroke: "#9aa7b8", "stroke-dasharray": "4 4", opacity: 0.6,
+    }));
+
+    const every = Math.ceil(n / 8);
+    for (let i = 0; i < n; i += every) {
+      const label = svg("text", { x: x(i), y: H - 8, "text-anchor": "middle", fill: "#9aa7b8", "font-size": 13 });
+      label.textContent = i === 0 ? "Start" : shortDate(days[i - 1]);
+      chart.append(label);
+    }
+
+    for (const { p, pts } of series) {
+      chart.append(svg("polyline", {
+        points: pts.map((v, i) => `${x(i)},${y(v)}`).join(" "),
+        fill: "none", stroke: p.color, "stroke-width": 2.5, "stroke-linejoin": "round", "stroke-linecap": "round",
+      }));
+      const cx = x(n - 1), cy = y(pts[n - 1]);
+      const clip = svg("clipPath", { id: `clip-${p.id}` });
+      clip.append(svg("circle", { cx, cy, r: 13 }));
+      const face = svg("image", { href: p.photo, x: cx - 13, y: cy - 13, width: 26, height: 26, "clip-path": `url(#clip-${p.id})` });
+      const tip = svg("title");
+      tip.textContent = `${p.name}: ${money(pts[n - 1])}`;
+      face.append(tip);
+      chart.append(clip, svg("circle", { cx, cy, r: 13, fill: "#fff" }), face,
+        svg("circle", { cx, cy, r: 14, fill: "none", stroke: p.color, "stroke-width": 2.5 }));
+    }
+    $("race").replaceChildren(chart);
+  }
+
+  function renderFame(all) {
+    const wins = Object.values(bets).filter((b) => b && b.result === "won" && PLAYER_BY_ID[b.player]);
+    const top = (arr, score) => arr.reduce((best, cur) => (best === null || score(cur) > score(best) ? cur : best), null);
+    const biggest = top(wins, profit);
+    const boldest = top(wins, (b) => b.odds);
+    const days = all.flatMap(({ p, s }) => Object.entries(s.daily).map(([d, v]) => ({ p, d, v })));
+    const bestDay = top(days.filter((x) => x.v > 0), (x) => x.v);
+    const streaker = top(all.filter(({ s }) => s.bestRun > 0), ({ s }) => s.bestRun);
+    const betText = (b) => `${b.pick || "Bet"} @ ${b.oddsText}`;
+
+    const items = [
+      ["💰 Biggest win", biggest && `${PLAYER_BY_ID[biggest.player].name} ${signedMoney(profit(biggest))}`, biggest && betText(biggest)],
+      ["🎯 Boldest winner", boldest && `${PLAYER_BY_ID[boldest.player].name} @ ${boldest.oddsText}`, boldest && (boldest.pick || "")],
+      ["📈 Best day", bestDay && `${bestDay.p.name} ${signedMoney(bestDay.v)}`, bestDay && shortDate(bestDay.d)],
+      ["🔥 Longest win streak", streaker && `${streaker.p.name} · ${streaker.s.bestRun} in a row`, ""],
+    ];
+    $("fame").replaceChildren(...items.map(([label, value, sub]) => {
+      const li = el("li");
+      li.append(el("div", "label", label), el("div", "value", value || "Up for grabs"));
+      if (value && sub) li.append(el("div", "meta", sub));
+      return li;
+    }));
   }
 
   function render() {
-    for (const p of PLAYERS) {
+    const all = PLAYERS.map((p) => ({ p, s: summarise(p.id) }));
+    const days = dayRange();
+    $("dayInfo").textContent = days.length
+      ? `Day ${days.length} · $${START_BALANCE} start · $${DEFAULT_STAKE} a day`
+      : `$${START_BALANCE} start · $${DEFAULT_STAKE} a day`;
+
+    // Rank on settled money only, and crown/clown only a clear first/last.
+    const settled = (x) => x.s.balance + x.s.inPlay;
+    const ranked = [...all].sort((a, b) => settled(b) - settled(a));
+    const started = all.some(({ s }) => s.won + s.lost > 0);
+    const leader = started && settled(ranked[0]) > settled(ranked[1]) ? ranked[0].p.id : null;
+    const last = started && settled(ranked[2]) < settled(ranked[1]) ? ranked[2].p.id : null;
+
+    for (const { p, s } of all) {
       const v = views[p.id];
-      const s = summarise(p.id);
+      v.card.classList.toggle("leader", p.id === leader);
+      v.rank.textContent = p.id === leader ? "👑" : p.id === last ? "🤡" : "";
       v.balance.textContent = money(s.balance);
       v.balance.classList.toggle("up", s.balance > START_BALANCE);
       v.balance.classList.toggle("down", s.balance < START_BALANCE);
-      v.inPlay.textContent = s.inPlay ? `${money(s.inPlay)} in play` : "";
+      const left = Math.max(0, Math.floor(s.balance / DEFAULT_STAKE + 1e-9));
+      v.inPlay.textContent = `${left} bet${left === 1 ? "" : "s"} left in the tank${s.inPlay ? ` · ${money(s.inPlay)} in play` : ""}`;
       v.record.textContent = `${s.won}W · ${s.lost}L`;
+
+      const hot = s.streak.n >= 3 && s.streak.result === "won";
+      const cold = s.streak.n >= 3 && s.streak.result === "lost";
+      v.streak.className = `tag ${hot ? "hot" : cold ? "cold" : ""}`;
+      v.streak.textContent = hot ? `🔥 ${s.streak.n} win streak` : cold ? `🧊 ${s.streak.n} loss streak` : "";
+
+      v.stats.winPct.textContent = s.winPct === null ? "–" : `${Math.round(s.winPct * 100)}%`;
+      v.stats.avgOdds.textContent = s.avgOdds === null ? "–" : s.avgOdds.toFixed(2);
+      v.stats.biggestWin.textContent = s.biggestWin ? money(s.biggestWin) : "–";
+      v.stats.roi.textContent = s.roi === null ? "–" : `${s.roi >= 0 ? "+" : ""}${Math.round(s.roi * 100)}%`;
+
+      renderBars(v.bars, s.daily, days);
       v.list.replaceChildren(
         ...(s.list.length ? s.list.map(([id, b]) => betRow(id, b)) : [el("li", "empty", "No bets yet")])
       );
     }
+
+    renderToday(all);
+    renderRace(all, days);
+    renderFame(all);
   }
 
   PLAYERS.forEach(buildCard);
