@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Score Counter</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #141a24;
+    --line: #26303f;
+    --text: #e8edf4;
+    --muted: #9aa7b8;
+    --accent: #ff7a1a;
+    --loss: #ff5c6c;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+    background: radial-gradient(1200px 600px at 80% -10%, #182234 0%, var(--bg) 60%);
+    color: var(--text);
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+    padding: 32px 40px;
+    text-align: center;
+    min-width: 340px;
+  }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+  .score {
+    font-size: 104px;
+    font-weight: 800;
+    line-height: 1;
+    margin: 8px 0 28px;
+    font-variant-numeric: tabular-nums;
+  }
+  input {
+    font: inherit;
+    width: 100%;
+    margin-bottom: 14px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: #0f141c;
+    color: var(--text);
+  }
+  button {
+    font: inherit;
+    font-weight: 700;
+    border: 0;
+    border-radius: 999px;
+    cursor: pointer;
+    padding: 12px 28px;
+    background: var(--accent);
+    color: #1a1204;
+    font-size: 16px;
+    transition: transform 0.08s ease;
+  }
+  button:active { transform: scale(0.96); }
+  button.big { font-size: 30px; padding: 18px 56px; }
+  button.link {
+    background: none;
+    color: var(--muted);
+    font-weight: 400;
+    font-size: 12px;
+    padding: 8px;
+    text-decoration: underline;
+  }
+  .breakdown { list-style: none; padding: 0; margin: 24px 0 0; color: var(--muted); font-size: 14px; }
+  .breakdown li { padding: 2px 0; }
+  .status { margin: 16px 0 0; font-size: 12px; color: var(--muted); }
+  .status.err { color: var(--loss); }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main class="card">
+  <h1>Score</h1>
+
+  <section id="setup">
+    <p class="sub">Enter your name, then pick the shared Teams folder this file lives in.</p>
+    <input id="nameInput" placeholder="Your name" maxlength="30" autocomplete="off">
+    <button id="connectBtn">Connect to shared folder</button>
+    <div><button id="changeBtn" class="link hidden">Choose a different folder</button></div>
+  </section>
+
+  <section id="game" class="hidden">
+    <div class="score" id="total">0</div>
+    <button class="big" id="incBtn">+1</button>
+    <ul class="breakdown" id="breakdown"></ul>
+  </section>
+
+  <p class="status" id="status"></p>
+</main>
+
+<script>
+  const FILE_PREFIX = "score-";
+  const POLL_MS = 3000;
+  const $ = (id) => document.getElementById(id);
+
+  let dir = null;
+  let me = null;
+  let myCount = 0;
+  let lastScores = {};
+  let writeChain = Promise.resolve();
+  let polling = false;
+
+  // Persist the folder handle so reopening only needs one click to re-grant access.
+  function idb(mode, fn) {
+    return new Promise((resolve, reject) => {
+      const open = indexedDB.open("score-counter", 1);
+      open.onupgradeneeded = () => open.result.createObjectStore("kv");
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const tx = open.result.transaction("kv", mode);
+        const req = fn(tx.objectStore("kv"));
+        tx.oncomplete = () => resolve(req.result);
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+  }
+  const saveDir = (h) => idb("readwrite", (s) => s.put(h, "dir"));
+  const loadDir = () => idb("readonly", (s) => s.get("dir"));
+
+  function setStatus(msg, isErr = false) {
+    $("status").textContent = msg;
+    $("status").classList.toggle("err", isErr);
+  }
+
+  function cleanName(raw) {
+    return raw.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 30);
+  }
+
+  // Each person writes only their own file, so OneDrive never has two people editing the same file.
+  async function readAll() {
+    const scores = {};
+    for await (const [fileName, handle] of dir.entries()) {
+      if (handle.kind !== "file" || !fileName.startsWith(FILE_PREFIX) || !fileName.endsWith(".json")) continue;
+      try {
+        const data = JSON.parse(await (await handle.getFile()).text());
+        const name = cleanName(String(data.name || ""));
+        if (!name || !Number.isInteger(data.count) || data.count < 0) continue;
+        // Max collapses any OneDrive conflict copies of the same person's file.
+        scores[name] = Math.max(scores[name] || 0, data.count);
+      } catch {
+        // File mid-sync; it will be picked up on the next poll.
+      }
+    }
+    return scores;
+  }
+
+  async function writeMine() {
+    const fh = await dir.getFileHandle(`${FILE_PREFIX}${me}.json`, { create: true });
+    const w = await fh.createWritable();
+    await w.write(JSON.stringify({ name: me, count: myCount, updated: new Date().toISOString() }));
+    await w.close();
+  }
+
+  function render(scores) {
+    lastScores = scores;
+    const merged = { ...scores, [me]: Math.max(scores[me] || 0, myCount) };
+    const total = Object.values(merged).reduce((a, b) => a + b, 0);
+    $("total").textContent = total;
+
+    const list = $("breakdown");
+    list.replaceChildren(
+      ...Object.entries(merged)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => {
+          const li = document.createElement("li");
+          li.textContent = `${name}${name === me ? " (you)" : ""}: ${count}`;
+          return li;
+        })
+    );
+  }
+
+  async function refresh() {
+    if (!dir || polling) return;
+    polling = true;
+    try {
+      render(await readAll());
+      setStatus(`Synced ${new Date().toLocaleTimeString()} · folder: ${dir.name}`);
+    } catch (e) {
+      setStatus(`Can't read folder: ${e.message}`, true);
+    } finally {
+      polling = false;
+    }
+  }
+
+  async function connect(handle) {
+    me = cleanName($("nameInput").value);
+    if (!me) {
+      setStatus("Please enter your name first.", true);
+      return;
+    }
+    if ((await handle.requestPermission({ mode: "readwrite" })) !== "granted") {
+      setStatus("Folder access was not granted.", true);
+      return;
+    }
+    localStorage.setItem("scoreCounterName", me);
+    dir = handle;
+    await saveDir(handle);
+
+    const scores = await readAll();
+    myCount = scores[me] || 0;
+    render(scores);
+
+    $("setup").classList.add("hidden");
+    $("game").classList.remove("hidden");
+    setStatus(`Connected to ${dir.name}`);
+    setInterval(refresh, POLL_MS);
+  }
+
+  async function pickAndConnect() {
+    try {
+      await connect(await window.showDirectoryPicker({ mode: "readwrite" }));
+    } catch (e) {
+      if (e.name !== "AbortError") setStatus(e.message, true);
+    }
+  }
+
+  $("incBtn").addEventListener("click", () => {
+    myCount++;
+    render(lastScores);
+    writeChain = writeChain.then(writeMine).catch((e) => setStatus(`Save failed: ${e.message}`, true));
+  });
+
+  $("changeBtn").addEventListener("click", pickAndConnect);
+
+  (async () => {
+    // Teams/SharePoint previews run HTML in a sandbox with no storage or folder access.
+    let sandboxed = window.self !== window.top;
+    try { localStorage.getItem("x"); } catch { sandboxed = true; }
+    if (sandboxed) {
+      setStatus("This is a Teams/SharePoint preview, which blocks saving. Open index.html from your synced Teams folder (File Explorer) in Edge or Chrome.", true);
+      $("connectBtn").disabled = true;
+      return;
+    }
+    if (!window.showDirectoryPicker) {
+      setStatus("Open this file in Microsoft Edge or Google Chrome.", true);
+      $("connectBtn").disabled = true;
+      return;
+    }
+    $("nameInput").value = localStorage.getItem("scoreCounterName") || "";
+
+    const saved = await loadDir().catch(() => null);
+    if (saved) {
+      $("connectBtn").textContent = `Reconnect to "${saved.name}"`;
+      $("changeBtn").classList.remove("hidden");
+      $("connectBtn").addEventListener("click", () =>
+        connect(saved).catch((e) => setStatus(e.message, true))
+      );
+    } else {
+      $("connectBtn").addEventListener("click", pickAndConnect);
+    }
+  })();
+</script>
+</body>
+</html>
