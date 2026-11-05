@@ -168,7 +168,7 @@
     const t = input.trim();
     const frac = t.match(/^(\d+(?:\.\d+)?)\s*[-/:]\s*(\d+(?:\.\d+)?)$/);
     if (frac) return { value: Number(frac[1]) / Number(frac[2]), text: `${frac[1]}-${frac[2]}` };
-    return { value: Number(t), text: `${t}-1` };
+    return { value: Number(t), text: t };
   }
 
   async function db(method, path, body) {
@@ -205,7 +205,7 @@
   const setResult = (id, result) =>
     save(() => db("PATCH", `bets/${encodeURIComponent(id)}`, { result }), "Result saved");
 
-  // Stake is taken out when placed; a win pays back stake plus stake × odds.
+  // Stake is taken out when placed; a win pays stake × odds (which already includes the stake).
   function summarise(playerId) {
     const list = Object.entries(bets)
       .filter(([, b]) => b && b.player === playerId)
@@ -213,7 +213,7 @@
     let balance = START_BALANCE, inPlay = 0, won = 0, lost = 0;
     for (const [, b] of list) {
       balance -= b.stake;
-      if (b.result === "won") { balance += b.stake * (b.odds + 1); won++; }
+      if (b.result === "won") { balance += b.stake * b.odds; won++; }
       else if (b.result === "lost") lost++;
       else inPlay += b.stake;
     }
@@ -224,9 +224,9 @@
     const li = el("li", "bet");
     const date = new Date(b.created).toLocaleDateString(undefined, { day: "numeric", month: "short" });
     const outcome =
-      b.result === "won" ? `+${money(b.stake * b.odds)}` :
+      b.result === "won" ? `+${money(b.stake * (b.odds - 1))}` :
       b.result === "lost" ? money(-b.stake) :
-      `to win ${money(b.stake * b.odds)}`;
+      `pays ${money(b.stake * b.odds)}`;
 
     const desc = el("div", "desc");
     desc.append(el("div", null, b.pick || "Bet"), el("div", "meta", `${date} · ${money(b.stake)} @ ${b.oddsText} · ${outcome}`));
@@ -277,7 +277,7 @@
     pick.placeholder = "Pick (e.g. Lakers to win)";
     pick.maxLength = 100;
     const odds = el("input");
-    odds.placeholder = "Odds 5/2";
+    odds.placeholder = "Odds e.g. 2.50";
     odds.required = true;
     const stake = el("input");
     stake.type = "number";
@@ -293,7 +293,7 @@
       const o = parseOdds(odds.value);
       const s = Number(stake.value);
       if (!Number.isFinite(o.value) || o.value <= 0 || o.value > 100) {
-        setStatus("Enter odds like 5/2, 2-1 or 2.5", true);
+        setStatus("Enter odds like 2.50", true);
         return;
       }
       if (!(s > 0 && s <= 1000)) {
