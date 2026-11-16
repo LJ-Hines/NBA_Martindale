@@ -180,7 +180,7 @@
 <body>
 <header>
   <h1>Betting Tracker</h1>
-  <p class="sub" id="dayInfo">$75 start · $5 a day</p>
+  <p class="sub" id="dayInfo">$75 start · $5 base stake, doubled after a loss</p>
 </header>
 <div class="wrap">
   <section class="panel">
@@ -343,8 +343,19 @@
         run = 0;
       }
     }
+    // Stake doubles after each loss in a row and goes back to the base stake after a win.
+    const lossStreak = streak.result === "lost" ? streak.n : 0;
+    const pending = asc.filter(([, b]) => !isSettled(b)).length;
+    // With bets still pending, plan for them losing; a win resets to the base stake once it's marked.
+    const nextStake = DEFAULT_STAKE * 2 ** (lossStreak + pending);
+    // How many more losses in a row the balance can cover (next, 2x next, 4x next, ...).
+    let betsLeft = 0;
+    for (let need = nextStake, left = balance; left >= need - 1e-9; need *= 2) {
+      left -= need;
+      betsLeft++;
+    }
     return {
-      asc, list: asc.slice().reverse(), balance, inPlay, won, lost, daily, streak, bestRun, biggestWin,
+      asc, list: asc.slice().reverse(), balance, inPlay, won, lost, daily, streak, bestRun, biggestWin, nextStake, betsLeft, pending,
       winPct: won + lost ? won / (won + lost) : null,
       avgOdds: asc.length ? oddsSum / asc.length : null,
       roi: staked ? net / staked : null,
@@ -435,7 +446,9 @@
     stake.min = "0.01";
     stake.step = "0.01";
     stake.value = DEFAULT_STAKE;
-    stake.title = "Stake ($)";
+    stake.title = "Stake ($), filled in from the loss streak";
+    // Once someone types their own stake, stop overwriting it until the bet is added.
+    stake.addEventListener("input", () => { stake.dataset.edited = "1"; });
     const add = el("button", null, "Add bet");
     form.append(pick, odds, stake, add);
 
@@ -464,6 +477,7 @@
         });
         pick.value = "";
         odds.value = "";
+        delete stake.dataset.edited;
       }, `Bet added for ${p.name}`);
       add.disabled = false;
     });
@@ -471,7 +485,7 @@
     const list = el("ul", "bets");
     card.append(who, balanceWrap, statsBox, barsBox, form, list);
     $("players").append(card);
-    views[p.id] = { card, rank, record, streak, balance, inPlay, stats, bars, list };
+    views[p.id] = { card, rank, record, streak, balance, inPlay, stats, bars, list, stake };
   }
 
   function renderBars(container, daily, days) {
@@ -620,8 +634,8 @@
     const all = PLAYERS.map((p) => ({ p, s: summarise(p.id) }));
     const days = dayRange();
     $("dayInfo").textContent = days.length
-      ? `Day ${days.length} · $${START_BALANCE} start · $${DEFAULT_STAKE} a day`
-      : `$${START_BALANCE} start · $${DEFAULT_STAKE} a day`;
+      ? `Day ${days.length} · $${START_BALANCE} start · $${DEFAULT_STAKE} base stake, doubled after a loss`
+      : `$${START_BALANCE} start · $${DEFAULT_STAKE} base stake, doubled after a loss`;
 
     // Rank on settled money only, and crown/clown only a clear first/last.
     const settled = (x) => x.s.balance + x.s.inPlay;
@@ -637,8 +651,12 @@
       v.balance.textContent = money(s.balance);
       v.balance.classList.toggle("up", s.balance > START_BALANCE);
       v.balance.classList.toggle("down", s.balance < START_BALANCE);
-      const left = Math.max(0, Math.floor(s.balance / DEFAULT_STAKE + 1e-9));
-      v.inPlay.textContent = `${left} bet${left === 1 ? "" : "s"} left in the tank${s.inPlay ? ` · ${money(s.inPlay)} in play` : ""}`;
+      const left = s.betsLeft;
+      const stakeText = s.pending
+        ? `next stake ${money(DEFAULT_STAKE)} if it wins, ${money(s.nextStake)} if it loses`
+        : `next stake ${money(s.nextStake)}`;
+      v.inPlay.textContent = `${left} bet${left === 1 ? "" : "s"} left in the tank · ${stakeText}${s.inPlay ? ` · ${money(s.inPlay)} in play` : ""}`;
+      if (!v.stake.dataset.edited) v.stake.value = s.nextStake;
       v.record.textContent = `${s.won}W · ${s.lost}L`;
 
       const hot = s.streak.n >= 3 && s.streak.result === "won";
